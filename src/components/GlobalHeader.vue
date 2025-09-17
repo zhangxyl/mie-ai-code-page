@@ -1,35 +1,63 @@
 <template>
-  <div class="global-header">
-    <div class="header-content">
-      <!-- 左侧 Logo 和标题 -->
-      <div class="logo-section">
-        <img src="@/assets/logo.png" alt="Logo" class="logo" />
-        <span class="site-title">羊咩咩AI应用生成</span>
-      </div>
-
-      <!-- 中间菜单 -->
-      <div class="menu-section">
+  <a-layout-header class="header">
+    <a-row :wrap="false">
+      <!-- 左侧：Logo和标题 -->
+      <a-col flex="200px">
+        <RouterLink to="/">
+          <div class="header-left">
+            <img class="logo" src="@/assets/logo.png" alt="Logo" />
+            <h1 class="site-title">羊咩咩应用生成</h1>
+          </div>
+        </RouterLink>
+      </a-col>
+      <!-- 中间：导航菜单 -->
+      <a-col flex="auto">
         <a-menu
           v-model:selectedKeys="selectedKeys"
           mode="horizontal"
           :items="menuItems"
-          class="header-menu"
           @click="handleMenuClick"
         />
-      </div>
-
-      <!-- 右侧用户区域 -->
-      <div class="user-section">
-        <a-button type="primary" @click="handleLogin"> 登录 </a-button>
-      </div>
-    </div>
-  </div>
+      </a-col>
+      <!-- 右侧：用户操作区域 -->
+      <a-col>
+        <div class="user-login-status">
+          <div v-if="loginUserStore.loginUser.id">
+            <a-dropdown>
+              <a-space>
+                <a-avatar :src="loginUserStore.loginUser.userAvatar" />
+                {{ loginUserStore.loginUser.userName ?? '无名' }}
+              </a-space>
+              <template #overlay>
+                <a-menu>
+                  <a-menu-item @click="doLogout">
+                    <LogoutOutlined />
+                    退出登录
+                  </a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
+          </div>
+          <div v-else>
+            <a-button type="primary" href="/user/login">登录</a-button>
+          </div>
+        </div>
+      </a-col>
+    </a-row>
+  </a-layout-header>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { computed, h, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import type {MenuProps} from 'ant-design-vue'
+import { type MenuProps, message } from 'ant-design-vue'
+import { useLoginUserStore } from '@/stores/loginUser.ts'
+import { userLogout } from '@/api/userController.ts'
+import { LogoutOutlined, HomeOutlined } from '@ant-design/icons-vue'
+
+// JS 中引入 Store
+const loginUserStore = useLoginUserStore()
+
 
 const router = useRouter()
 // 当前选中菜单
@@ -39,29 +67,41 @@ router.afterEach((to, from, next) => {
   selectedKeys.value = [to.path]
 })
 // 菜单配置
-const menuItems = reactive([
+const originItems = [
   {
-    key: 'home',
-    label: '首页',
-    title: '首页',
+    key: '/',
+    icon: () => h(HomeOutlined),
+    label: '主页',
+    title: '主页',
   },
   {
-    key: 'resources',
-    label: '资源',
-    title: '资源',
+    key: '/admin/userManage',
+    label: '用户管理',
+    title: '用户管理',
   },
   {
-    key: 'about',
-    label: '关于',
-    title: '关于',
+    key: '/admin/appManage',
+    label: '应用管理',
+    title: '应用管理',
   },
-])
-
-// 登录按钮处理
-const handleLogin = () => {
-  // 这里处理登录逻辑
-  console.log('点击登录')
+]
+// 过滤菜单项
+const filterMenus = (menus = [] as MenuProps['items']) => {
+  return menus?.filter((menu) => {
+    const menuKey = menu?.key as string
+    if (menuKey?.startsWith('/admin')) {
+      const loginUser = loginUserStore.loginUser
+      if (!loginUser || loginUser.userRole !== 'admin') {
+        return false
+      }
+    }
+    return true
+  })
 }
+
+// 展示在菜单的路由数组
+const menuItems = computed<MenuProps['items']>(() => filterMenus(originItems))
+
 // 处理菜单点击
 const handleMenuClick: MenuProps['onClick'] = (e) => {
   const key = e.key as string
@@ -71,118 +111,47 @@ const handleMenuClick: MenuProps['onClick'] = (e) => {
     router.push(key)
   }
 }
-
+// 退出登录
+const doLogout = async () => {
+  const res = await userLogout()
+  if (res.data.code === 0) {
+    loginUserStore.setLoginUser({
+      userName: '未登录',
+    })
+    message.success('退出登录成功')
+    await router.push('/user/login')
+  } else {
+    message.error('退出登录失败，' + res.data.message)
+  }
+}
 
 </script>
 
 <style scoped>
-.global-header {
-  height: 64px;
+.header {
   background: #fff;
-  border-bottom: 1px solid #e8e8e8;
-}
-
-.header-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   padding: 0 24px;
 }
 
-.logo-section {
+.header-left {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-width: 200px;
 }
 
 .logo {
-  height: 32px;
-  width: 32px;
-  object-fit: contain;
+  height: 48px;
+  width: 48px;
 }
 
 .site-title {
+  margin: 0;
   font-size: 18px;
-  font-weight: 600;
   color: #1890ff;
-  white-space: nowrap;
 }
 
-.menu-section {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-}
-
-.header-menu {
-  border-bottom: none;
-  background: transparent;
-  min-width: 400px;
-}
-
-.user-section {
-  min-width: 100px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-/* 响应式设计 */
-@media (max-width: 992px) {
-  .header-content {
-    padding: 0 16px;
-  }
-
-  .logo-section {
-    min-width: 150px;
-  }
-
-  .site-title {
-    font-size: 16px;
-  }
-
-  .header-menu {
-    min-width: 300px;
-  }
-}
-
-@media (max-width: 768px) {
-  .header-content {
-    padding: 0 12px;
-  }
-
-  .logo-section {
-    min-width: 120px;
-  }
-
-  .site-title {
-    font-size: 14px;
-  }
-
-  .menu-section {
-    display: none; /* 在小屏幕上隐藏菜单，可以后续添加移动端菜单 */
-  }
-}
-
-@media (max-width: 576px) {
-  .header-content {
-    padding: 0 8px;
-  }
-
-  .logo-section {
-    min-width: 100px;
-  }
-
-  .logo {
-    height: 28px;
-    width: 28px;
-  }
-
-  .site-title {
-    font-size: 12px;
-  }
+.ant-menu-horizontal {
+  border-bottom: none !important;
 }
 </style>
+
