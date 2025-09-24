@@ -21,9 +21,39 @@ myAxios.interceptors.request.use(
   },
 )
 
+// 处理大整数的自定义 JSON 解析器
+const parseJSONWithBigInt = (text: string) => {
+  return JSON.parse(text, (key, value) => {
+    // 如果是 id 字段且是大整数，保持为字符串
+    if (key === 'id' && typeof value === 'number' && value > Number.MAX_SAFE_INTEGER) {
+      return String(value)
+    }
+    return value
+  })
+}
+
 // 全局响应拦截器
 myAxios.interceptors.response.use(
   function (response) {
+    // 如果响应是 JSON 格式，重新解析以处理大整数
+    if (response.headers['content-type']?.includes('application/json')) {
+      try {
+        const originalData = response.data
+        // 如果数据中包含可能的大整数 ID，进行特殊处理
+        if (typeof originalData === 'object' && originalData !== null) {
+          response.data = JSON.parse(JSON.stringify(originalData), (key, value) => {
+            // 处理 id 字段的大整数问题
+            if (key === 'id' && typeof value === 'number' && !Number.isSafeInteger(value)) {
+              return String(value)
+            }
+            return value
+          })
+        }
+      } catch (error) {
+        console.warn('JSON 大整数处理失败:', error)
+      }
+    }
+
     const { data } = response
     // 未登录
     if (data.code === 40100) {
