@@ -58,7 +58,6 @@ import { LogoutOutlined, HomeOutlined } from '@ant-design/icons-vue'
 // JS 中引入 Store
 const loginUserStore = useLoginUserStore()
 
-
 const router = useRouter()
 // 当前选中菜单
 const selectedKeys = ref<string[]>(['/'])
@@ -83,6 +82,11 @@ const originItems = [
     key: '/admin/appManage',
     label: '应用管理',
     title: '应用管理',
+  },
+  {
+    key: '/admin/chatHistoryManage',
+    label: '对话管理',
+    title: '对话管理',
   },
 ]
 // 过滤菜单项
@@ -124,7 +128,6 @@ const doLogout = async () => {
     message.error('退出登录失败，' + res.data.message)
   }
 }
-
 </script>
 
 <style scoped>
@@ -154,4 +157,3 @@ const doLogout = async () => {
   border-bottom: none !important;
 }
 </style>
-

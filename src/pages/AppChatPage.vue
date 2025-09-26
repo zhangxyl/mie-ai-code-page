@@ -49,8 +49,26 @@
       <div class="chat-section">
         <!-- 消息区域 -->
         <div class="messages-container" ref="messagesContainer">
+          <!-- 加载更多历史消息按钮 -->
+          <div v-if="hasMoreHistory && messages.length > 0" class="load-more-container">
+            <a-button
+              type="link"
+              :loading="loadingHistory"
+              @click="loadMoreHistory"
+              class="load-more-btn"
+            >
+              <template #icon>
+                <UpOutlined />
+              </template>
+              加载更多历史消息
+            </a-button>
+          </div>
+
           <!-- 欢迎消息 -->
-          <div v-if="messages.length === 0 && !isGenerating" class="welcome-message">
+          <div
+            v-if="messages.length === 0 && !isGenerating && !loadingHistory"
+            class="welcome-message"
+          >
             <div class="welcome-content">
               <div class="welcome-icon">
                 <RobotOutlined />
@@ -223,8 +241,10 @@ import {
   InfoCircleOutlined,
   EditOutlined,
   DeleteOutlined,
+  UpOutlined,
 } from '@ant-design/icons-vue'
 import { getAppVoById, deployApp as deployAppApi, deleteApp } from '@/api/appController'
+import { getLatestChatHistory } from '@/api/chatHistoryController'
 import { useLoginUserStore } from '@/stores/loginUser'
 
 import request from '@/request'
@@ -252,9 +272,14 @@ interface Message {
   role: 'user' | 'ai'
   content: string
   timestamp: Date
+  id?: number
 }
 
 const messages = ref<Message[]>([])
+// 对话历史相关
+const hasMoreHistory = ref(true)
+const loadingHistory = ref(false)
+const lastCreateTime = ref<string>()
 const inputMessage = ref('')
 const isGenerating = ref(false)
 const currentAiMessage = ref('')
@@ -272,10 +297,74 @@ const messagesContainer = ref<HTMLElement>()
 // EventSource 引用
 let eventSource: EventSource | null = null
 
+// 加载对话历史
+const loadChatHistory = async (isLoadMore = false) => {
+  if (!appId.value) return
+
+  if (isLoadMore) {
+    loadingHistory.value = true
+  }
+
+  try {
+    const params: any = {
+      appId: appId.value,
+      limit: 10,
+    }
+
+    if (isLoadMore && lastCreateTime.value) {
+      params.lastCreateTime = lastCreateTime.value
+    }
+
+    const res = await getLatestChatHistory(params)
+    if (res.data.code === 0 && res.data.data) {
+      const historyMessages = res.data.data.map((item: API.ChatHistoryVO) => ({
+        role: item.messageType === 'user' ? 'user' : 'ai',
+        content: item.message || '',
+        timestamp: new Date(item.createTime || ''),
+        id: item.id,
+      })) as Message[]
+
+      // 由于后端返回的是最新的消息在前，我们需要反转顺序
+      // 让最老的消息在前，最新的消息在后（符合聊天界面习惯）
+      const sortedMessages = historyMessages.reverse()
+
+      if (isLoadMore) {
+        // 加载更多时，将更老的消息插入到现有消息前面
+        messages.value = [...sortedMessages, ...messages.value]
+      } else {
+        // 首次加载时，直接设置消息列表
+        messages.value = sortedMessages
+      }
+
+      // 更新游标和是否还有更多数据
+      if (historyMessages.length > 0) {
+        lastCreateTime.value = res.data.data[res.data.data.length - 1]?.createTime
+        hasMoreHistory.value = historyMessages.length === 10
+      } else {
+        hasMoreHistory.value = false
+      }
+    }
+  } catch (error) {
+    console.error('加载对话历史失败:', error)
+    if (isLoadMore) {
+      message.error('加载历史消息失败')
+    }
+  } finally {
+    if (isLoadMore) {
+      loadingHistory.value = false
+    }
+  }
+}
+
+// 加载更多历史消息
+const loadMoreHistory = async () => {
+  await loadChatHistory(true)
+}
+
 // 获取应用信息
 const fetchAppInfo = async () => {
   try {
-    const res = await getAppVoById({ id: appId.value })
+    const res = await getAppVoById({ id: appId.value as any })
     if (res.data.code === 0 && res.data.data) {
       appInfo.value = res.data.data
 
@@ -287,25 +376,26 @@ const fetchAppInfo = async () => {
       // 检查是否是管理员（假设管理员角色为 'admin'）
       isAdmin.value = loginUserStore.loginUser.userRole === 'admin'
 
-      // 检查是否有 view=1 查询参数，如果有则不自动发送消息
-      const hasViewParam = route.query.view === '1'
+      // 先加载对话历史
+      await loadChatHistory()
 
-      // 根据路由判断是否自动发送初始提示词
-      // 只有在 /app/chat/:id 路由（新创建应用）时才自动发送
-      // 在 /app/edit/:id 路由（编辑现有应用）时不自动发送
-      // 如果有 view=1 参数，则不自动发送
+      // 移除 view 参数的逻辑，改为根据对话历史判断
+      // 只有在是自己的应用且没有对话历史时才自动发送初始消息
       const isNewApp = route.name === '应用对话'
       const isEditApp = route.name === '应用编辑'
 
-      if (appInfo.value.initPrompt && messages.value.length === 0 && isNewApp && !hasViewParam) {
+      if (appInfo.value.initPrompt && messages.value.length === 0 && isNewApp && canEdit.value) {
         await sendInitialMessage(appInfo.value.initPrompt)
       } else if (isEditApp && appInfo.value.initPrompt) {
         // 编辑模式：将初始提示词设置到输入框中，但不自动发送
         inputMessage.value = appInfo.value.initPrompt
       }
 
-      // 设置预览URL
-      updatePreviewUrl()
+      // 根据对话历史数量决定是否显示网站预览
+      // 如果有至少2条对话记录，则显示网站
+      if (messages.value.length >= 2) {
+        updatePreviewUrl()
+      }
     } else {
       message.error('获取应用信息失败')
       router.push('/')
@@ -528,7 +618,7 @@ const deployApp = async () => {
 
   deploying.value = true
   try {
-    const res = await deployAppApi({ appId: appId.value })
+    const res = await deployAppApi({ appId: appId.value as any })
     if (res.data.code === 0) {
       message.success('部署成功！')
       if (res.data.data) {
@@ -634,7 +724,7 @@ const deleteAppFromDetail = async () => {
   if (!appId.value) return
 
   try {
-    const res = await deleteApp({ id: appId.value })
+    const res = await deleteApp({ id: appId.value as any })
     if (res.data.code === 0) {
       message.success('删除成功')
       appDetailModalVisible.value = false
@@ -1160,6 +1250,23 @@ onMounted(() => {
   .preview-section {
     height: 400px;
   }
+}
+
+/* 加载更多历史消息样式 */
+.load-more-container {
+  text-align: center;
+  padding: 16px 0;
+  border-bottom: 1px solid #f0f0f0;
+  margin-bottom: 16px;
+}
+
+.load-more-btn {
+  color: #1890ff;
+  font-size: 14px;
+}
+
+.load-more-btn:hover {
+  color: #40a9ff;
 }
 
 @media (max-width: 768px) {
